@@ -273,15 +273,19 @@
   function buildBriefing() {
     const dieParts = [];
     const rezItems = [];
+    const now = Date.now();
 
     timers.forEach((t) => {
-      if (!t.endAt) return; // include only started timers
+      if (!t.endAt || !t.running) return;
+      const remaining = t.endAt - now;
+      if (remaining <= 0) return;
+
       const endHM = fmtTimeHM(getKRDate(new Date(t.endAt))); // minutes only for briefing
       const name = (t.elements.input.value || '').trim();
-      const piece = (name ? name : '') + endHM; // e.g., "손님19:17" or "19:17"
+      const piece = (name ? name : '') + endHM;
 
       if (t.type === 'die') {
-        dieParts.push(piece); // keep creation order
+        dieParts.push(piece);
       } else {
         rezItems.push({ end: t.endAt, piece });
       }
