@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8"/>
+<title>간안본철수 타이머</title>
+<link href="https://i.imgur.com/E2A4DUp.png" rel="icon" type="image/png"/>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: 'Arial', sans-serif;
+    text-align: center;
+    padding: 20px;
+    font-size: 14px;
+    transition: background 0.3s, color 0.3s;
+  }
+  .light { background: #f8f9fa; color: #222; }
+  .dark  { background: #121212; color: #e0e0e0; }
+  h1 { margin-bottom: 20px; display:flex; align-items:center; justify-content:center; gap:8px; }
+  .theme-toggle { position: absolute; top: 15px; right: 20px; }
+  .controls { margin: 10px 0 20px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+  .btn {
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-weight: 700;
+    border: none;
+    cursor: pointer;
+  }
+  .btn-add-rez { background:#3498db; color:#fff; }
+  .btn-add-die { background:#e74c3c; color:#fff; }
+  .btn-brief   { background:#2ecc71; color:#fff; }
+  .timers { display:flex; flex-wrap:wrap; gap:12px; justify-content:center; }
+  .timer-card {
+    position: relative;
+    width: 140px;
+    padding: 10px 10px 12px;
+    border-radius: 12px;
+    background: inherit;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  }
+  .timer-card .delete-btn {
+    position:absolute; top:6px; right:6px;
+    width:20px; height:20px; border:none; border-radius:50%;
+    background: rgba(0,0,0,.15); color:#fff; cursor:pointer; font-weight:900;
+    line-height:20px;
+  }
+  .timer-card .delete-btn:hover { filter: brightness(1.1); }
+  .circle-wrapper { width: 110px; height: 110px; margin: 0 auto 6px; position:relative; }
+  .circle-svg { transform: rotate(-90deg); }
+  .bg-ring { fill: none; stroke: #eee; stroke-width: 6; }
+  .fg-ring { fill: none; stroke-width: 6; stroke-linecap: round; stroke-dasharray: 283; stroke-dashoffset: 0; transition: stroke-dashoffset 0.2s linear; }
+  .fg-ring.rez{ stroke:#3498db; }
+  .fg-ring.die{ stroke:#e74c3c; }
+  .time-label {
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px; font-weight:800; pointer-events:none;
+  }
+  .name-input {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 700;
+    width: 100%; box-sizing:border-box;
+    padding:6px 8px; border-radius:8px; border:1px solid rgba(0,0,0,.15);
+    background: transparent; color: inherit;
+  }
+  .meta { margin-top:6px; font-size:12px; line-height:1.35; white-space:pre-line; min-height:1.2em; }
+  @keyframes blinkScreen {
+    0%, 50%, 100% { background-color: transparent; }
+    25%, 75% { background-color: rgba(231, 76, 60, 0.15); }
+  }
+  .screen-blink { animation: blinkScreen 1s infinite; }
+  @media (prefers-color-scheme: dark) {
+    .dark .bg-ring { stroke:#333; }
+    .dark .fg-ring.rez { stroke:#5dade2; }
+    .dark .fg-ring.die { stroke:#ec7063; }
+    .timer-card { box-shadow: 0 1px 4px rgba(255,255,255,.05); }
+  }
+  .toast {
+    position: fixed; left: 50%; transform: translateX(-50%);
+    bottom: 24px; padding: 10px 14px; border-radius: 10px;
+    background: rgba(0,0,0,.75); color:#fff; font-weight:700;
+    opacity: 0; pointer-events:none; transition: opacity .25s;
+    z-index: 9999;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <div class="theme-toggle">
+    <select id="themeSelect">
+      <option value="auto">🌗 자동</option>
+      <option value="light">🌞 라이트</option>
+      <option value="dark">🌙 다크</option>
+    </select>
+  </div>
+
+  <h1>간안본철수 타이머</h1>
+
+  <div class="controls">
+    <button class="btn btn-add-rez" id="addRez">➕ 리저 추가 (30분)</button>
+    <button class="btn btn-add-die" id="addDie">➕ 다이 추가 (15분)</button>
+    <button class="btn btn-brief" id="briefBtn">📋 리저/다이 브리핑 복사</button>
+  </div>
+
+  <div class="timers" id="timers"></div>
+
+  <div class="toast" id="toast">클립보드에 복사되었습니다</div>
+
+<script>
+(() => {
+  const SVG_CIRCUM = 2 * Math.PI * 45; // r=45
+  const timers = new Map(); // id -> timer data
+  let counterRez = 0;
+  let counterDie = 0;
+
+  function getKRDate(d = new Date()) {
+    return new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Seoul' }));
+  }
+  function fmtTimeHM(d) {
+    return d.toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  }
+  function fmtTimeHMS(d) {
+    return d.toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function fmtTimeHMSms(ms) {
+    const min = Math.floor(ms / 60000);
+    const sec = Math.floor((ms % 60000) / 1000);
+    return `${String(min).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  }
+
+  function showToast(msg="클립보드에 복사되었습니다") {
+    const toast = document.getElementById('toast');
+    toast.textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 1500);
+  }
+
+  function applyTheme(mode) {
+    document.body.classList.remove('light', 'dark');
+    if (mode === 'light') document.body.classList.add('light');
+    else if (mode === 'dark') document.body.classList.add('dark');
+    else {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.body.classList.add(prefersDark ? 'dark' : 'light');
+    }
+  }
+  const themeSelect = document.getElementById('themeSelect');
+  themeSelect.addEventListener('change', () => applyTheme(themeSelect.value));
+  applyTheme('auto');
+
+  function setScreenBlinking(on) {
+    document.body.classList.toggle('screen-blink', on);
+  }
+  function updateScreenBlinking() {
+    // any die timer with <= 30s remaining and running -> blink screen
+    for (const t of timers.values()) {
+      if (t.type === 'die' && t.running) {
+        const now = Date.now();
+        const remaining = t.endAt - now;
+        if (remaining <= 30000 && remaining > 0) {
+          setScreenBlinking(true);
+          return;
+        }
+      }
+    }
+    setScreenBlinking(false);
+  }
+
+  function createTimer(type) {
+    const id = `${type}-${type==='rez' ? ++counterRez : ++counterDie}`;
+    const duration = type === 'rez' ? 1800_000 : 900_000; // rez 30m, die 15m
+    const card = document.createElement('div');
+    card.className = 'timer-card';
+    card.dataset.type = type;
+    card.dataset.id = id;
+
+    card.innerHTML = `
+      <button class="delete-btn" title="삭제">×</button>
+      <div class="circle-wrapper">
+        <svg class="circle-svg" width="110" height="110">
+          <circle class="bg-ring" cx="55" cy="55" r="45"></circle>
+          <circle class="fg-ring ${type}" cx="55" cy="55" r="45"></circle>
+        </svg>
+        <div class="time-label">시작</div>
+      </div>
+      <input class="name-input" type="text" placeholder="이름 (선택)" />
+      <div class="meta"></div>
+    `;
+
+    const delBtn = card.querySelector('.delete-btn');
+    const ring = card.querySelector('.fg-ring');
+    const label = card.querySelector('.time-label');
+    const input = card.querySelector('.name-input');
+    const meta  = card.querySelector('.meta');
+    const wrapper = card.querySelector('.circle-wrapper');
+
+    const timerState = {
+      id, type, duration,
+      running: false,
+      startAt: null,
+      endAt: null,
+      interval: null,
+      elements: { ring, label, input, meta, card, wrapper }
+    };
+    timers.set(id, timerState);
+
+    function resetVisual() {
+      ring.style.strokeDashoffset = 0;
+      label.textContent = '시작';
+      label.style.color = 'inherit';
+      meta.textContent = '';
+    }
+
+    function startOrRefresh() {
+      // if running -> refresh (restart from full duration)
+      if (timerState.running) {
+        clearInterval(timerState.interval);
+        timerState.running = false;
+      }
+      timerState.startAt = Date.now();
+      timerState.endAt = timerState.startAt + timerState.duration;
+
+      const startKR = getKRDate(new Date(timerState.startAt));
+      const endKR   = getKRDate(new Date(timerState.endAt));
+      meta.textContent = `시작: ${fmtTimeHMS(startKR)}
+종료: ${fmtTimeHMS(endKR)}`;
+
+      timerState.running = true;
+      timerState.interval = setInterval(() => {
+        const now = Date.now();
+        const remaining = timerState.endAt - now;
+        if (remaining <= 0) {
+          clearInterval(timerState.interval);
+          timerState.running = false;
+          label.textContent = '00:00';
+          label.style.color = '#999';
+          ring.style.strokeDashoffset = SVG_CIRCUM;
+          updateScreenBlinking();
+          return;
+        }
+        const offset = SVG_CIRCUM * (1 - (remaining / timerState.duration));
+        ring.style.strokeDashoffset = offset;
+        label.textContent = fmtTimeHMSms(remaining);
+        updateScreenBlinking();
+      }, 250);
+      updateScreenBlinking();
+    }
+
+    // click to start/refresh
+    wrapper.addEventListener('click', startOrRefresh);
+
+    // delete
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (timerState.interval) clearInterval(timerState.interval);
+      timers.delete(id);
+      card.remove();
+      updateScreenBlinking();
+    });
+
+    // initial visual
+    resetVisual();
+    document.getElementById('timers').appendChild(card);
+  }
+
+  // Add buttons
+  document.getElementById('addRez').addEventListener('click', () => createTimer('rez'));
+  document.getElementById('addDie').addEventListener('click', () => createTimer('die'));
+
+  // Briefing builder
+  
+  function buildBriefing() {
+    const dieParts = [];
+    const rezItems = [];
+
+    timers.forEach((t) => {
+      if (!t.endAt) return; // include only started timers
+      const endHM = fmtTimeHM(getKRDate(new Date(t.endAt))); // minutes only for briefing
+      const name = (t.elements.input.value || '').trim();
+      const piece = (name ? name : '') + endHM; // e.g., "손님19:17" or "19:17"
+
+      if (t.type === 'die') {
+        dieParts.push(piece); // keep creation order
+      } else {
+        rezItems.push({ end: t.endAt, piece });
+      }
+    });
+
+    rezItems.sort((a,b)=>a.end - b.end);
+    const rezParts = rezItems.map(x=>x.piece);
+
+    const left = dieParts.join(' ');
+    const right = rezParts.join(' ');
+    const result = left && right ? `${left} // ${right}` : (left || right || '');
+    return result;
+  }
+
+  async function copyBriefing() {
+    const text = buildBriefing();
+    if (!text) { showToast('복사할 브리핑이 없습니다'); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast('클립보드에 복사되었습니다');
+    } catch (e) {
+      // Fallback
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+      showToast('클립보드에 복사되었습니다');
+    }
+  }
+  document.getElementById('briefBtn').addEventListener('click', copyBriefing);
+
+  // default theme auto
+  // no default timers; user adds as needed
+})();</script>
+
+<div style="text-align:right; margin-top: 30px; font-size: 14px; color: gray;">제작자 - 간안본철수</div>
+</body>
+</html>
