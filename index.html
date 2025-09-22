@@ -99,6 +99,17 @@
   <div class="controls">
     <button class="btn btn-add-rez" id="addRez">➕ 리저 추가 (30분)</button>
     <button class="btn btn-add-die" id="addDie">➕ 다이 추가 (15분)</button>
+    <label style="display:flex;align-items:center;gap:6px;font-weight:700;">
+      형식
+      <select id="briefFormat" style="padding:6px 8px;border-radius:8px;border:1px solid rgba(0,0,0,.2);background:transparent;color:inherit;">
+        <option value="HHMMSS">HH:MM:SS</option>
+        <option value="HHMM" selected>HH:MM</option>
+        <option value="MMSS">MM:SS</option>
+        <option value="HhMmSs">00h00m00s</option>
+        <option value="HhMm">00h00m</option>
+        <option value="MmSs">00m00s</option>
+      </select>
+    </label>
     <button class="btn btn-brief" id="briefBtn">📋 리저/다이 브리핑 복사</button>
   </div>
 
@@ -121,6 +132,29 @@
   }
   function fmtTimeHMS(d) {
     return d.toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  
+  function getBriefFormat() {
+    const sel = document.getElementById('briefFormat');
+    return sel ? sel.value : 'HHMM';
+  }
+  function two(n){return String(n).padStart(2,'0');}
+  function fmtBrief(endDate){
+    const fmt = getBriefFormat();
+    const d = getKRDate(endDate);
+    const hh = two(d.getHours());
+    const mm = two(d.getMinutes());
+    const ss = two(d.getSeconds());
+    switch(fmt){
+      case 'HHMMSS': return `${hh}:${mm}:${ss}`;
+      case 'HHMM':   return `${hh}:${mm}`;
+      case 'MMSS':   return `${mm}:${ss}`;
+      case 'HhMmSs': return `${hh}h${mm}m${ss}s`;
+      case 'HhMm':   return `${hh}h${mm}m`;
+      case 'MmSs':   return `${mm}m${ss}s`;
+      default:       return `${hh}:${mm}`;
+    }
   }
 
   function fmtTimeHMSms(ms) {
@@ -250,6 +284,17 @@
     // click to start/refresh
     wrapper.addEventListener('click', startOrRefresh);
 
+    // right-click to reset immediately
+    wrapper.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (timerState.interval) clearInterval(timerState.interval);
+      timerState.running = false;
+      timerState.startAt = null;
+      timerState.endAt = null;
+      resetVisual();
+      updateScreenBlinking();
+    });
+
     // delete
     delBtn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -280,7 +325,7 @@
       const remaining = t.endAt - now;
       if (remaining <= 0) return;
 
-      const endHM = fmtTimeHM(getKRDate(new Date(t.endAt))); // minutes only for briefing
+      const endHM = fmtBrief(new Date(t.endAt)); // minutes only for briefing
       const name = (t.elements.input.value || '').trim();
       const piece = (name ? name : '') + endHM;
 
